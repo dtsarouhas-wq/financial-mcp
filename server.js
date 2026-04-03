@@ -1,41 +1,63 @@
 import express from "express";
 import crypto from "node:crypto";
 
-// ── Stock Data ───────────────────────────────────────────────────────
-const STOCKS = {
-  AAPL:  { symbol: "AAPL",  name: "Apple Inc.",              sector: "Technology",        marketCap: "3.4T",  price: 228.50, rank: 1 },
-  MSFT:  { symbol: "MSFT",  name: "Microsoft Corporation",   sector: "Technology",        marketCap: "3.1T",  price: 415.80, rank: 2 },
-  NVDA:  { symbol: "NVDA",  name: "NVIDIA Corporation",      sector: "Technology",        marketCap: "2.8T",  price: 135.20, rank: 3 },
-  GOOGL: { symbol: "GOOGL", name: "Alphabet Inc.",           sector: "Technology",        marketCap: "2.1T",  price: 170.30, rank: 4 },
-  AMZN:  { symbol: "AMZN",  name: "Amazon.com Inc.",         sector: "Consumer Cyclical", marketCap: "2.0T",  price: 192.40, rank: 5 },
-  META:  { symbol: "META",  name: "Meta Platforms Inc.",     sector: "Technology",        marketCap: "1.5T",  price: 585.60, rank: 6 },
-  "BRK.B": { symbol: "BRK.B", name: "Berkshire Hathaway",   sector: "Financial",         marketCap: "1.1T",  price: 478.90, rank: 7 },
-  TSM:   { symbol: "TSM",   name: "Taiwan Semiconductor",    sector: "Technology",        marketCap: "950B",  price: 183.70, rank: 8 },
-  LLY:   { symbol: "LLY",   name: "Eli Lilly and Company",   sector: "Healthcare",        marketCap: "850B",  price: 895.20, rank: 9 },
-  AVGO:  { symbol: "AVGO",  name: "Broadcom Inc.",           sector: "Technology",        marketCap: "820B",  price: 178.40, rank: 10 },
-  JPM:   { symbol: "JPM",   name: "JPMorgan Chase & Co.",    sector: "Financial",         marketCap: "680B",  price: 235.10, rank: 11 },
-  V:     { symbol: "V",     name: "Visa Inc.",               sector: "Financial",         marketCap: "620B",  price: 310.50, rank: 12 },
-  WMT:   { symbol: "WMT",   name: "Walmart Inc.",            sector: "Consumer Defensive",marketCap: "600B",  price: 90.80,  rank: 13 },
-  XOM:   { symbol: "XOM",   name: "Exxon Mobil Corporation", sector: "Energy",            marketCap: "510B",  price: 118.30, rank: 14 },
-  MA:    { symbol: "MA",    name: "Mastercard Incorporated",  sector: "Financial",         marketCap: "480B",  price: 515.40, rank: 15 },
-  UNH:   { symbol: "UNH",   name: "UnitedHealth Group",      sector: "Healthcare",        marketCap: "470B",  price: 520.60, rank: 16 },
-  COST:  { symbol: "COST",  name: "Costco Wholesale Corp.",  sector: "Consumer Defensive",marketCap: "420B",  price: 950.20, rank: 17 },
-  HD:    { symbol: "HD",    name: "The Home Depot Inc.",     sector: "Consumer Cyclical", marketCap: "400B",  price: 405.30, rank: 18 },
-  PG:    { symbol: "PG",    name: "Procter & Gamble Co.",    sector: "Consumer Defensive",marketCap: "390B",  price: 168.70, rank: 19 },
-  ORCL:  { symbol: "ORCL",  name: "Oracle Corporation",      sector: "Technology",        marketCap: "380B",  price: 170.90, rank: 20 },
-};
+// ── Yahoo Finance API ────────────────────────────────────────────────
+async function fetchStockData(ticker) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d`;
 
+  const resp = await fetch(url, {
+    headers: { "User-Agent": "Mozilla/5.0" },
+  });
+
+  if (!resp.ok) throw new Error(`Yahoo API returned ${resp.status}`);
+
+  const data = await resp.json();
+
+  if (data.chart.error) {
+    throw new Error(data.chart.error.description || "Unknown Yahoo error");
+  }
+
+  const result = data.chart.result?.[0];
+  if (!result) throw new Error(`No data found for ticker: ${ticker}`);
+
+  const meta = result.meta;
+  const change = meta.regularMarketPrice - meta.chartPreviousClose;
+  const changePct = ((change / meta.chartPreviousClose) * 100).toFixed(2);
+
+  return {
+    symbol: meta.symbol,
+    name: meta.longName || meta.shortName || ticker,
+    price: meta.regularMarketPrice,
+    previousClose: meta.chartPreviousClose,
+    change: parseFloat(change.toFixed(2)),
+    changePercent: `${changePct}%`,
+    dayHigh: meta.regularMarketDayHigh,
+    dayLow: meta.regularMarketDayLow,
+    volume: meta.regularMarketVolume,
+    fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh,
+    fiftyTwoWeekLow: meta.fiftyTwoWeekLow,
+    currency: meta.currency,
+    exchange: meta.fullExchangeName,
+  };
+}
+
+// ── Tool Definition ──────────────────────────────────────────────────
 const TOOL_DEF = {
   name: "get_stock_price",
-  description: "Returns the price and details of a stock by its ticker symbol.",
+  description: "Returns real-time stock price and details from Yahoo Finance. Works with any valid ticker symbol (e.g. AAPL, MSFT, NVDA, GOOGL, TSLA, AMZN, META, etc.).",
   inputSchema: {
     type: "object",
     required: ["ticker"],
-    properties: { ticker: { type: "string", description: "Stock ticker symbol (e.g. AAPL, MSFT, NVDA)" } },
+    properties: {
+      ticker: {
+        type: "string",
+        description: "Stock ticker symbol (e.g. AAPL, MSFT, NVDA, TSLA, GOOGL)",
+      },
+    },
   },
 };
 
-const SERVER_INFO = { name: "FinancialMCP", version: "1.0.0" };
+const SERVER_INFO = { name: "FinancialMCP", version: "2.0.0" };
 
 // ── Express ──────────────────────────────────────────────────────────
 const app = express();
@@ -51,15 +73,12 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res, next) => {
-  console.log(`>>> ${req.method} ${req.url} | Accept: ${req.headers.accept}`);
+  console.log(`>>> ${req.method} ${req.url} | ${req.body?.method || ""}`);
   next();
 });
 
-// ── SSE Sessions: sessionId → sseResponse ────────────────────────────
-const sessions = {};
-
-// Handle JSON-RPC message and return result object
-function handleMessage(body) {
+// ── Handle JSON-RPC message ──────────────────────────────────────────
+async function handleMessage(body) {
   const { method, id, params } = body;
 
   if (method === "initialize") {
@@ -73,9 +92,7 @@ function handleMessage(body) {
     };
   }
 
-  if (method === "notifications/initialized") {
-    return null; // no response needed
-  }
+  if (method === "notifications/initialized") return null;
 
   if (method === "tools/list") {
     return { jsonrpc: "2.0", id, result: { tools: [TOOL_DEF] } };
@@ -83,17 +100,28 @@ function handleMessage(body) {
 
   if (method === "tools/call") {
     const ticker = (params?.arguments?.ticker || "").toUpperCase();
-    const stock = STOCKS[ticker];
-    if (!stock) {
-      return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: `Ticker "${ticker}" not found. Available: ${Object.keys(STOCKS).join(", ")}` }] } };
+
+    try {
+      const stock = await fetchStockData(ticker);
+      return {
+        jsonrpc: "2.0", id,
+        result: { content: [{ type: "text", text: JSON.stringify(stock, null, 2) }] },
+      };
+    } catch (err) {
+      return {
+        jsonrpc: "2.0", id,
+        result: { content: [{ type: "text", text: `Error fetching ${ticker}: ${err.message}` }] },
+      };
     }
-    return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(stock, null, 2) }] } };
   }
 
   return { jsonrpc: "2.0", id, error: { code: -32601, message: `Unknown method: ${method}` } };
 }
 
-// ── GET /mcp → SSE stream (old SSE protocol) ─────────────────────────
+// ── SSE Sessions ─────────────────────────────────────────────────────
+const sessions = {};
+
+// GET /mcp → SSE stream (old SSE protocol)
 app.get("/mcp", (req, res) => {
   const sessionId = crypto.randomUUID();
   console.log(`[sse] New session: ${sessionId}`);
@@ -105,14 +133,11 @@ app.get("/mcp", (req, res) => {
     "X-Accel-Buffering": "no",
   });
 
-  // Send endpoint event — tells client where to POST messages
   res.write(`event: endpoint\ndata: /mcp?sessionId=${sessionId}\n\n`);
   res.flush?.();
 
-  // Store session
   sessions[sessionId] = res;
 
-  // Keep alive
   const keepAlive = setInterval(() => {
     res.write(`: ping\n\n`);
     res.flush?.();
@@ -125,29 +150,22 @@ app.get("/mcp", (req, res) => {
   });
 });
 
-// ── POST /mcp → handle messages ──────────────────────────────────────
-app.post("/mcp", (req, res) => {
+// POST /mcp → handle messages
+app.post("/mcp", async (req, res) => {
   const sessionId = req.query.sessionId;
   const { method } = req.body || {};
   console.log(`[post] ${method} | session: ${sessionId || "none"}`);
 
-  const result = handleMessage(req.body);
+  const result = await handleMessage(req.body);
 
-  // If we have an SSE session, send result there
   if (sessionId && sessions[sessionId]) {
     const sseRes = sessions[sessionId];
-
     if (result) {
       sseRes.write(`event: message\ndata: ${JSON.stringify(result)}\n\n`);
       sseRes.flush?.();
-      console.log(`[post] Result sent via SSE stream`);
     }
-
-    // Acknowledge the POST
     res.status(202).send("Accepted");
-  }
-  // No SSE session — respond directly with SSE format on POST
-  else {
+  } else {
     if (result) {
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
@@ -159,9 +177,9 @@ app.post("/mcp", (req, res) => {
   }
 });
 
-// ── Health check ─────────────────────────────────────────────────────
+// Health check
 app.head("/", (req, res) => res.status(200).end());
 app.get("/", (req, res) => res.json({ status: "ok", ...SERVER_INFO }));
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`\n🟢 Financial MCP on port ${PORT} — SSE + POST\n`));
+app.listen(PORT, () => console.log(`\n🟢 Financial MCP v2.0 on port ${PORT} — Live Yahoo Finance data\n`));
