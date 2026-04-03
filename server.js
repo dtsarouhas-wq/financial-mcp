@@ -70,18 +70,22 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── Helper: respond in format the client wants ───────────────────────
+// ── Helper: respond — prefer JSON when client accepts it ─────────────
 function respond(req, res, jsonRpcResponse) {
   const accept = req.headers.accept || "";
 
-  // If client wants SSE → send as event stream
-  if (accept.includes("text/event-stream")) {
+  // If client accepts JSON (preferred) → send as JSON
+  if (accept.includes("application/json")) {
+    res.json(jsonRpcResponse);
+  }
+  // If client only wants SSE → send as event stream
+  else if (accept.includes("text/event-stream")) {
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.write(`event: message\ndata: ${JSON.stringify(jsonRpcResponse)}\n\n`);
     res.end();
   }
-  // Otherwise → send as plain JSON
+  // Fallback → JSON
   else {
     res.json(jsonRpcResponse);
   }
