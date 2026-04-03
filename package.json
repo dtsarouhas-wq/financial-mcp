@@ -1,0 +1,22 @@
+{
+  "name": "financial-mcp",
+  "version": "1.0.0",
+  "description": "Simple Financial MCP Server - Top 20 Stocks",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "mcp",
+    "finance",
+    "stocks"
+  ],
+  "author": "Dimitris",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "express": "^5.2.1",
+    "zod": "^4.3.6"
+  }
+}
