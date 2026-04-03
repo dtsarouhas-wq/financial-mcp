@@ -1,4 +1,5 @@
 import express from "express";
+import crypto from "node:crypto";
 
 // ── Stock Data ───────────────────────────────────────────────────────
 const STOCKS = {
@@ -40,7 +41,6 @@ const SERVER_INFO = { name: "FinancialMCP", version: "1.0.0" };
 const app = express();
 app.use(express.json());
 
-// CORS
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -50,67 +50,118 @@ app.use((req, res, next) => {
   next();
 });
 
-// Log everything
 app.use((req, res, next) => {
-  console.log(`>>> ${req.method} ${req.url} | Accept: ${req.headers.accept} | Body: ${JSON.stringify(req.body?.method || req.body)}`);
+  console.log(`>>> ${req.method} ${req.url} | Accept: ${req.headers.accept}`);
   next();
 });
 
-// ── ALL responses are JSON. No SSE. ──────────────────────────────────
+// ── SSE Sessions: sessionId → sseResponse ────────────────────────────
+const sessions = {};
 
-// SSE helper
-function sse(res, data) {
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.write(`event: message\ndata: ${JSON.stringify(data)}\n\n`);
-  res.end();
-}
-
-app.get("/mcp", (req, res) => {
-  sse(res, { jsonrpc: "2.0", result: { status: "ok", ...SERVER_INFO }, id: null });
-});
-
-app.post("/mcp", (req, res) => {
-  const { method, id, params } = req.body || {};
+// Handle JSON-RPC message and return result object
+function handleMessage(body) {
+  const { method, id, params } = body;
 
   if (method === "initialize") {
-    return sse(res, {
+    return {
       jsonrpc: "2.0", id,
       result: {
         protocolVersion: "2025-03-26",
         capabilities: { tools: { listChanged: true } },
         serverInfo: SERVER_INFO,
       },
-    });
+    };
   }
 
   if (method === "notifications/initialized") {
-    return res.status(204).end();
+    return null; // no response needed
   }
 
   if (method === "tools/list") {
-    return sse(res, { jsonrpc: "2.0", id, result: { tools: [TOOL_DEF] } });
+    return { jsonrpc: "2.0", id, result: { tools: [TOOL_DEF] } };
   }
 
   if (method === "tools/call") {
     const ticker = (params?.arguments?.ticker || "").toUpperCase();
     const stock = STOCKS[ticker];
-
     if (!stock) {
-      return sse(res, {
-        jsonrpc: "2.0", id,
-        result: { content: [{ type: "text", text: `Ticker "${ticker}" not found. Available: ${Object.keys(STOCKS).join(", ")}` }] },
-      });
+      return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: `Ticker "${ticker}" not found. Available: ${Object.keys(STOCKS).join(", ")}` }] } };
     }
-
-    return sse(res, {
-      jsonrpc: "2.0", id,
-      result: { content: [{ type: "text", text: JSON.stringify(stock, null, 2) }] },
-    });
+    return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(stock, null, 2) }] } };
   }
 
-  sse(res, { jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } });
+  return { jsonrpc: "2.0", id, error: { code: -32601, message: `Unknown method: ${method}` } };
+}
+
+// ── GET /mcp → SSE stream (old SSE protocol) ─────────────────────────
+app.get("/mcp", (req, res) => {
+  const sessionId = crypto.randomUUID();
+  console.log(`[sse] New session: ${sessionId}`);
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+
+  // Send endpoint event — tells client where to POST messages
+  res.write(`event: endpoint\ndata: /mcp?sessionId=${sessionId}\n\n`);
+  res.flush?.();
+
+  // Store session
+  sessions[sessionId] = res;
+
+  // Keep alive
+  const keepAlive = setInterval(() => {
+    res.write(`: ping\n\n`);
+    res.flush?.();
+  }, 15000);
+
+  res.on("close", () => {
+    console.log(`[sse] Session closed: ${sessionId}`);
+    delete sessions[sessionId];
+    clearInterval(keepAlive);
+  });
 });
 
+// ── POST /mcp → handle messages ──────────────────────────────────────
+app.post("/mcp", (req, res) => {
+  const sessionId = req.query.sessionId;
+  const { method } = req.body || {};
+  console.log(`[post] ${method} | session: ${sessionId || "none"}`);
+
+  const result = handleMessage(req.body);
+
+  // If we have an SSE session, send result there
+  if (sessionId && sessions[sessionId]) {
+    const sseRes = sessions[sessionId];
+
+    if (result) {
+      sseRes.write(`event: message\ndata: ${JSON.stringify(result)}\n\n`);
+      sseRes.flush?.();
+      console.log(`[post] Result sent via SSE stream`);
+    }
+
+    // Acknowledge the POST
+    res.status(202).send("Accepted");
+  }
+  // No SSE session — respond directly with SSE format on POST
+  else {
+    if (result) {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.write(`event: message\ndata: ${JSON.stringify(result)}\n\n`);
+      res.end();
+    } else {
+      res.status(204).end();
+    }
+  }
+});
+
+// ── Health check ─────────────────────────────────────────────────────
+app.head("/", (req, res) => res.status(200).end());
+app.get("/", (req, res) => res.json({ status: "ok", ...SERVER_INFO }));
+
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`\n🟢 Financial MCP on port ${PORT} — pure JSON, no SSE\n`));
+app.listen(PORT, () => console.log(`\n🟢 Financial MCP on port ${PORT} — SSE + POST\n`));
