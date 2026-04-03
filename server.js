@@ -58,15 +58,23 @@ app.use((req, res, next) => {
 
 // ── ALL responses are JSON. No SSE. ──────────────────────────────────
 
+// SSE helper
+function sse(res, data) {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.write(`event: message\ndata: ${JSON.stringify(data)}\n\n`);
+  res.end();
+}
+
 app.get("/mcp", (req, res) => {
-  res.json({ jsonrpc: "2.0", result: { status: "ok", ...SERVER_INFO } });
+  sse(res, { jsonrpc: "2.0", result: { status: "ok", ...SERVER_INFO }, id: null });
 });
 
 app.post("/mcp", (req, res) => {
   const { method, id, params } = req.body || {};
 
   if (method === "initialize") {
-    return res.json({
+    return sse(res, {
       jsonrpc: "2.0", id,
       result: {
         protocolVersion: "2025-03-26",
@@ -77,11 +85,11 @@ app.post("/mcp", (req, res) => {
   }
 
   if (method === "notifications/initialized") {
-    return res.json({ jsonrpc: "2.0", result: {} });
+    return res.status(204).end();
   }
 
   if (method === "tools/list") {
-    return res.json({ jsonrpc: "2.0", id, result: { tools: [TOOL_DEF] } });
+    return sse(res, { jsonrpc: "2.0", id, result: { tools: [TOOL_DEF] } });
   }
 
   if (method === "tools/call") {
@@ -89,19 +97,19 @@ app.post("/mcp", (req, res) => {
     const stock = STOCKS[ticker];
 
     if (!stock) {
-      return res.json({
+      return sse(res, {
         jsonrpc: "2.0", id,
         result: { content: [{ type: "text", text: `Ticker "${ticker}" not found. Available: ${Object.keys(STOCKS).join(", ")}` }] },
       });
     }
 
-    return res.json({
+    return sse(res, {
       jsonrpc: "2.0", id,
       result: { content: [{ type: "text", text: JSON.stringify(stock, null, 2) }] },
     });
   }
 
-  res.json({ jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } });
+  sse(res, { jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } });
 });
 
 const PORT = process.env.PORT || 3001;
