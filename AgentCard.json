@@ -1,0 +1,93 @@
+{
+  "name": "FinancialConcierge",
+  "type": "task",
+  "instructions": [
+    "Financial assistant for credit union members. Routes requests to task agents for stock prices, market indices, portfolio, trading, loans, and currency exchange."
+  ],
+  "tools": [
+    {
+      "name": "get_stock_price",
+      "description": "Returns real-time stock price and details. Accepts ticker symbols (AAPL, NVDA) OR company names (Apple, Nvidia). The server resolves names automatically.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["ticker"],
+        "properties": {
+          "ticker": { "type": "string", "description": "Stock ticker symbol" }
+        }
+      }
+    },
+    {
+      "name": "get_market_index",
+      "description": "Returns real-time data for major market indices: SP500, NASDAQ, DOW, FTSE, DAX, NIKKEI, HANG SENG, CAC, EUROSTOXX, RUSSELL, VIX, ASX.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["index"],
+        "properties": {
+          "index": { "type": "string", "description": "Market index name (e.g. NASDAQ, SP500, DOW)" }
+        }
+      }
+    },
+    {
+      "name": "get_portfolio",
+      "description": "Returns the member's investment portfolio: holdings, shares, average cost, and cash balance.",
+      "inputSchema": {
+        "type": "object",
+        "required": [],
+        "properties": {}
+      }
+    },
+    {
+      "name": "place_trade_request",
+      "description": "Submits a trade request (buy, sell, or transfer) queued for advisor confirmation.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["action", "ticker", "shares"],
+        "properties": {
+          "action": { "type": "string", "description": "Trade action: buy, sell, or transfer" },
+          "ticker": { "type": "string", "description": "Stock ticker symbol" },
+          "shares": { "type": "number", "description": "Number of shares" }
+        }
+      }
+    },
+    {
+      "name": "calculate_loan",
+      "description": "Calculates monthly payment, total interest, and total cost for a loan.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["principal", "annual_rate", "term_months"],
+        "properties": {
+          "principal": { "type": "number", "description": "Loan amount in USD" },
+          "annual_rate": { "type": "number", "description": "Annual interest rate as percentage (e.g. 6.5)" },
+          "term_months": { "type": "number", "description": "Loan term in months" }
+        }
+      }
+    },
+    {
+      "name": "get_exchange_rate",
+      "description": "Returns exchange rate between two currencies and converts an amount. Supports USD, EUR, GBP, JPY, CAD, AUD, CHF, MXN, BRL.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["from", "to"],
+        "properties": {
+          "from": { "type": "string", "description": "Source currency code (e.g. USD)" },
+          "to": { "type": "string", "description": "Target currency code (e.g. EUR)" },
+          "amount": { "type": "number", "description": "Amount to convert (default 1)" }
+        }
+      }
+    }
+  ],
+  "mcp": [
+    {
+      "url": "https://financial-mcp-1fqs.onrender.com/mcp",
+      "transport": "streamable_http",
+      "tools": [
+        "get_stock_price",
+        "get_market_index",
+        "get_portfolio",
+        "place_trade_request",
+        "calculate_loan",
+        "get_exchange_rate"
+      ]
+    }
+  ]
+}

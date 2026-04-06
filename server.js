@@ -38,6 +38,29 @@ async function fetchYahooData(ticker) {
   };
 }
 
+// ── Company Name → Ticker mapping ───────────────────────────────────
+const COMPANY_NAMES = {
+  "APPLE": "AAPL", "MICROSOFT": "MSFT", "NVIDIA": "NVDA",
+  "GOOGLE": "GOOGL", "ALPHABET": "GOOGL", "AMAZON": "AMZN",
+  "META": "META", "FACEBOOK": "META", "TESLA": "TSLA",
+  "NETFLIX": "NFLX", "AMD": "AMD", "INTEL": "INTC",
+  "DISNEY": "DIS", "WALMART": "WMT", "JPMORGAN": "JPM",
+  "BANK OF AMERICA": "BAC", "GOLDMAN SACHS": "GS",
+  "COCA COLA": "KO", "COCA-COLA": "KO", "PEPSI": "PEP",
+  "NIKE": "NKE", "VISA": "V", "MASTERCARD": "MA",
+  "PAYPAL": "PYPL", "SALESFORCE": "CRM", "ORACLE": "ORCL",
+  "IBM": "IBM", "UBER": "UBER", "AIRBNB": "ABNB",
+  "SPOTIFY": "SPOT", "SNAP": "SNAP", "SNAPCHAT": "SNAP",
+  "BOEING": "BA", "EXXON": "XOM", "CHEVRON": "CVX",
+  "PFIZER": "PFE", "MODERNA": "MRNA", "COSTCO": "COST",
+  "STARBUCKS": "SBUX", "VANGUARD S&P 500": "VOO", "VOO": "VOO",
+};
+
+function resolveTicker(input) {
+  const upper = (input || "").toUpperCase().trim();
+  return COMPANY_NAMES[upper] || upper;
+}
+
 // ── Market Indices mapping ───────────────────────────────────────────
 const INDICES = {
   "SP500":   "^GSPC",   "S&P500":  "^GSPC",   "S&P 500": "^GSPC",
@@ -78,7 +101,7 @@ const tradeLog = [];
 const TOOLS = [
   {
     name: "get_stock_price",
-    description: "Returns real-time stock price and details from Yahoo Finance. Works with any valid ticker symbol (e.g. AAPL, MSFT, NVDA, GOOGL, TSLA, AMZN, META).",
+    description: "Returns real-time stock price and details. Accepts ticker symbols (AAPL, NVDA) OR company names (Apple, Nvidia). The server resolves names to tickers automatically.",
     inputSchema: {
       type: "object",
       required: ["ticker"],
@@ -172,7 +195,7 @@ app.use((req, res, next) => {
 async function handleToolCall(name, args) {
   // ── Stock Price ──
   if (name === "get_stock_price") {
-    const ticker = (args?.ticker || "").toUpperCase();
+    const ticker = resolveTicker(args?.ticker);
     const data = await fetchYahooData(ticker);
     return JSON.stringify(data, null, 2);
   }
